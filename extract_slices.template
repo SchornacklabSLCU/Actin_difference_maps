@@ -1,0 +1,60 @@
+// extract_slices.template version 1.0 (June 2019)
+// CAUTION: This is a *template file* which contains invalid ImageJ characters.
+// Therefore you cannot run it directly. R analyse_actin.sh instead.
+
+setBatchMode(true);
+
+// Retrieve the name of a TIFF file received as argument, loads it and returns 
+// its parameters (width and height, number of channels, slices and frames). 
+inputPath = getArgument();
+open(inputPath);
+getDimensions(width, height, channels, slices, frames);
+
+// Here we define some useful file aliases that will help us to create 
+// output file names. For more details see online ImageJ macro documentation.
+fileName = File.getName(inputPath);
+fileBase = File.nameWithoutExtension;
+filePath = File.getParent(inputPath);
+// File.getParent returns 0 when the file is located in the current folder.
+// In that case we redefine filePath as "." (standard name for current folder). 
+if (filePath == 0) {filePath = ".";};
+
+// Here we create folders for confocal slices and pixel data (= matrices).
+sliceDir = fileBase + "_slices";
+pixelDir = fileBase + "_pixels";
+File.makeDirectory(filePath + File.separator + sliceDir);
+File.makeDirectory(filePath + File.separator + pixelDir);
+
+// Now we can tell ImageJ to convert the TIFF stack to individual images.
+run("Stack to Images");
+
+// Here we allow the user to define the upper limit for the slices to keep.
+// This is because photobleaching occurs over time and the latest slices from a 
+// given stack may be of poor quality.
+maxSlices = <max_slices>;
+if (slices < maxSlices) {upperLimit = slices;} else {upperLimit = maxSlices;};
+
+for(i = 1; i <= upperLimit; i++) {
+  // There is no printf-like formatter in ImageJ macros.
+  // To achieve 0001, ..., 0010, ..., 0100 we calculate the number of zeroes to
+  // add in front of the number fo maintain a constant length of 4 (znum) and 
+  // later extract the corresponding substring from a template (zpad).
+  znum = floor(log(i) / log(10)) + 1;
+  zpad = substring("000000000000", 0, 4 - znum);
+  // This is the name of the current slice we are working with.
+  curSlice = fileBase + "-" + zpad + i;
+  selectWindow(curSlice);
+  // We save the slice as a matrix and as a TIFF image.
+  saveAs("Text Image", filePath + File.separator 
+                     + pixelDir + File.separator 
+                     + curSlice + ".txt");
+  saveAs("Tiff", filePath + File.separator 
+               + sliceDir + File.separator 
+               + curSlice + ".tif");
+  // Not mandatory but this will also free some memory...
+  close();
+}
+
+// We print width, height and matrix directory for use by the next script!
+print(width, height, pixelDir);
+setBatchMode(false);

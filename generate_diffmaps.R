@@ -1,0 +1,90 @@
+#! /usr/bin/env Rscript
+# generate_diffmaps.template version 1.0 (June 2019)
+# CAUTION: This is a *template file* which contains invalid R characters.
+# Therefore you cannot run it directly. R analyse_actin.sh instead.
+
+# We first retrieve the three arguments 
+args = commandArgs(trailingOnly = TRUE)
+inputDir = args[1]
+imageWidth = args[2]
+imageHeight = args[3]
+plotFile = args[4]
+mapDir = paste0(inputDir, "_map")
+dir.create(mapDir, showWarnings = FALSE)
+
+# Import normalized, centered pixels values from the given image matrix.
+importNormCenteredMatrix = function(fileName) {
+  sourceFile = file.path(inputDir, fileName)
+  rawValues = read.table(sourceFile, sep="\t")
+  # Image is 1024 x 1024 and is 8-bits.
+  normValues = as.matrix(rawValues, nrow = imageHeight, ncol = imageWidth) / 255
+  normCenteredValues = normValues - mean(normValues)
+  return(normCenteredValues)
+}
+
+dataFiles = list.files(inputDir, pattern='*txt')
+ncMatrices = lapply(dataFiles, importNormCenteredMatrix) 
+
+sliceCount = length(ncMatrices)
+
+colNames = c("interval", "intensity")
+result = data.frame(interval = numeric(), intensity = numeric()) 
+
+
+for (i in 1 : sliceCount) {
+
+  # Defines the interval to compare with the current slice. For instance, when
+  # i = 1, comparison is done with all images (1 to sliceCount). When i = 2, 
+  # comparison is done with images from 2 to sliceCount. There is no need to 
+  # compare 2 with 1 since we already did it by comparing 1 with 2.
+  toCompare = i : sliceCount
+
+  for (j in toCompare) {
+    writeLines(paste("      (R) Comparing", i, "and", j))
+
+    # Retrieve the two matrices to compare.
+    mat1 = ncMatrices[[i]]
+    mat2 = ncMatrices[[j]]
+
+    # Time interval in seconds.
+    timeInterval = (j - i) * 10
+    
+    # Get the difference map and center it toward 0 by subtracting the mean.
+    diffMat = mat2 - mat1
+    centeredDiffMat = diffMat - mean(diffMat) 
+
+    # Discard values lower than SD and keep absolute value otherwise (this is 
+    # important for the last step, see below).
+    sdMat = sd(centeredDiffMat)
+    maskedCenteredDiffMat = apply(centeredDiffMat, c(1, 2), 
+      function(x) if (abs(x) <= sdMat) 0 else abs(x))
+    
+    # Saves the difference map so we can later load it with ImageJ
+    # The corresponding ImageJ macro is draw_diffmaps.ijm
+    mapFile = paste0(inputDir, "_", i, "_", j, "_", "map.csv")
+    mapPath = file.path(mapDir, mapFile)
+
+    # We write the final matrix as text images with values in range [0..255].
+    write.table(floor(maskedCenteredDiffMat * 255), mapPath, 
+      row.names = FALSE, col.names = FALSE, quote = FALSE, sep = ",")
+    
+    # Creates a new dataframe ('this') containing the time interval and the mean
+    # pixel intensity of the difference map. FIXME: I am not quite sure about 
+    # this last operation. It is really a mean we need to calculate?
+    this = data.frame(timeInterval, mean(maskedCenteredDiffMat))
+    names(this) = colNames
+    result = rbind(this, result)
+  }
+}
+
+# Writes the final data for further use.
+write.table(result, file.path(inputDir, "output.tsv"), sep="\t",
+  col.names = FALSE, row.names = FALSE)
+
+# Plot intensities as time function.
+jpeg(plotFile, 
+  width = 800, 
+  height = 600, 
+  pointsize = 24)
+plot(result, xlab = "Time interval (s)", ylab = "Fluorescence intensity (AU)")
+dev.off()
